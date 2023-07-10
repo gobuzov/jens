@@ -1,0 +1,4 @@
+23.07.10
+	v.0.02
+	+saveSna
+	+whats_new.txt to git

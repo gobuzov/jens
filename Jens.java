@@ -1,7 +1,4 @@
-import files.Sna;
-
-import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.*;
 import java.util.*;
 /* Jens is One class z80 assembler by Arcadiy Gobuzov */
 // todo Macros like in Gens
@@ -26,7 +23,7 @@ public class Jens{
         this.path = path;
     }
     public void compile() {
-        System.out.println("Jens v0.01 started");
+        System.out.println("Jens v0.02 started");
         Vector<String> com = new Vector<>();
         remember = new Vector(); errors = null;
         try {
@@ -194,8 +191,7 @@ public class Jens{
                 throw new Exception("use: INCLUDE FILENAME");
             String fname = cmd.get(1);// todo check repeating file
             //
-            String[] arr = readTextFile(cutQuotes(path + cutQuotes(fname)));
-            System.out.println("Include " + fname);
+            String[] arr = loadTextFile(cutQuotes(path + cutQuotes(fname)));
             fileStack.push(new Object[]{curr, lineId, cmdId, commands, fname});
             curr = arr;
             commands = null;
@@ -291,8 +287,7 @@ public class Jens{
                     throw new Exception("use: savesna FILENAME.sna, STARTPOINT [STACKPLACE]");// todo STACKPLACE
                 String fname = cmd.get(1);
                 int start = calculate(cmd.get(2));
-                Sna sna = new Sna();
-                sna.write(path + fname, mem, start);
+                saveSna(path + fname, start);
             }else if ("savebin".equals(s)){// todo
 
             }
@@ -437,19 +432,6 @@ public class Jens{
             return "(hl)";
         String val = tx.get(s);
         return null!=val? val : ty.get(s);
-    }
-    public String[] readTextFile(String path) throws Exception {
-        Vector<String> v = new Vector<>();
-        BufferedReader br = new BufferedReader(new FileReader(path));
-        String line = br.readLine();
-        while (line != null) {
-            v.add(line);
-            //  System.out.println(line);
-            line = br.readLine();
-        }
-        String[] arr = new String[v.size()];
-        v.copyInto(arr);
-        return arr;
     }
     public int calculate(String s) throws Exception {
         s = s.trim();
@@ -644,5 +626,49 @@ public class Jens{
         rsv.add("endmodule");rsv.add("savesna");rsv.add("savebin");rsv.add("db");rsv.add("dw");rsv.add("ds");
         rsv.add("equ");rsv.add("if");rsv.add("endif");rsv.add("unphase");rsv.add("phase");rsv.add("display");
         // rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");
+    }
+///------------------------- IN / OUT Routines ---------------
+    public void saveSna(String path, int start) { // 48 while
+        try {
+            int af = 0, bc = 0, de = 0, hl = 0;
+            int af2 = 0, bc2 = 0, de2 = 0, hl2 = 0x2758;
+            int ix = 0, iy = 0x5c3a, sp = 0xfffe, ir = 0x3fff; // some def values
+            int inter = 0, intMode = 1, border = 0;
+            mem[sp] = (byte) (start & 255); // 0xbffe
+            mem[sp+1] = (byte) (start >> 8); // 0xbfff
+            OutputStream os = new FileOutputStream(new File(path));
+            os.write(ir>>8); // 0x3f
+            os.write(hl2&255);os.write(hl2>>8); // 10072;
+            os.write(de2&255);os.write(de2>>8);
+            os.write(bc2&255);os.write(bc2>>8);
+            os.write(af2&255);os.write(af2>>8);
+            os.write(hl&255);os.write(hl>>8);
+            os.write(de&255);os.write(de>>8);
+            os.write(bc&255);os.write(bc>>8);
+            os.write(iy&255);os.write(iy>>8); //
+            os.write(ix&255);os.write(ix>>8);
+            os.write(inter); // 0
+            os.write(ir&255);
+            os.write(af&255);os.write(af>>8);
+            os.write(sp&255);os.write(sp>>8); // 0xfffe
+            os.write(intMode); // 1
+            os.write(border);
+            os.write(mem, 0x4000, 0xc000);
+        }catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    public String[] loadTextFile(String path) throws Exception {
+        Vector<String> v = new Vector<>();
+        BufferedReader br = new BufferedReader(new FileReader(path));
+        String line = br.readLine();
+        while (line != null) {
+            v.add(line);
+            //  System.out.println(line);
+            line = br.readLine();
+        }
+        String[] arr = new String[v.size()];
+        v.copyInto(arr);
+        return arr;
     }
 }
