@@ -1,7 +1,6 @@
 import java.io.*;
 import java.util.*;
 /* Jens is One class z80 assembler by Arcadiy Gobuzov */
-// todo Macros like in Gens
 public class Jens{
     public final static int NOPARAM = 255, NUMB = 250, BRACK = 251, IX = 221, IY = 253, IM = 19, RST = 20, LD = 21;
     byte[] mem = new byte[65536]; // memory for compiled bytes
@@ -9,6 +8,8 @@ public class Jens{
     Hashtable<String, Integer> varValues = new Hashtable<>(); // key:name, value: int
     Hashtable<String, Hashtable> modules = new Hashtable<>();// key:module name, value - vars of module
     Hashtable <String, Integer>currModule = null;
+    /// key:Macro name, value:[Vector<String> params, Vector<Vector<String>> body of macros]
+    Hashtable <String, Object[]>macros = new Hashtable<>();
     Stack <Hashtable> moduleStack = new Stack();// push Hashtable<String, Integer> // like varValues for every Module
     Stack fileStack = new Stack();// push String[], Integer lineId, cmdId
     int lineId = 0, cmdId = 0; // current Line in curr array, current Command in Line
@@ -23,7 +24,7 @@ public class Jens{
         this.path = path;
     }
     public void compile() {
-        System.out.println("Jens v0.02 started");
+        System.out.println("Jens v0.03 started");
         Vector<String> com = new Vector<>();
         remember = new Vector(); errors = null;
         try {
@@ -34,7 +35,7 @@ public class Jens{
                         break;
                     String s = com.get(0);
                     currLabel = null;
-                    if (false == rsv.contains(s)) {
+                    if (false==macros.containsKey(s) && false == rsv.contains(s)) {
                         if (-1 == ofset)
                             throw new Exception("Declaration before ORG");
                         if (null != varValues.get(s))
@@ -125,7 +126,8 @@ public class Jens{
         if (0 == v.size())
             return v;
         Vector<String> w = splitString(v.get(0), "\t ", 1);
-        if (false ==  rsv.contains(w.get(0)) && w.size() > 1) { // mean first word is LABEL
+        String lab = w.get(0);
+        if (false==macros.containsKey(lab) && false ==  rsv.contains(lab) && w.size() > 1) { // mean first word is LABEL
             Vector<String> x = splitString(w.get(1), "\t ", 1);
             w.remove(1);
             w.add(x.get(0));
@@ -186,7 +188,35 @@ public class Jens{
     void doCommand (Vector<String> cmd) throws Exception {
         String s = cmd.get(0);
         int size = cmd.size();
-        if ("include".equals(s)) { // First: check Directives
+        if ("macro".equals(s)){
+            if (1 == size)
+                throw new Exception("use: MACRO NAME [PARAMS NAMES]"); // Vector<String> w = splitString(v.get(0), "\t ", 1);
+            Vector<Vector<String>> body = new Vector();
+            Vector<String> params = new Vector();
+            String name = cmd.get(1);
+            Vector<String> x = splitString(cmd.get(1), "\t ", 1);// cut name and param1:MACRO WAVEOUT reg, data
+            if (2==x.size()){
+                name = x.get(0);
+                params.add(x.get(1));
+            }
+            if (null!=macros.get(name))
+                throw new Exception("Secondary initialization of MACROS "+name);
+            if (rsv.contains(name))
+                throw new Exception("Name for MACROS "+name+" is RESERVED WORD");
+            if (cmd.size()>2)
+                for (int i = 2; i < size; i++)
+                    params.add(cmd.get(i));
+            cmd = getCommand();
+            while (true){
+                if (cmd.isEmpty())
+                    throw new Exception("Macros "+name +" not closed");
+                if ("endm".equals(cmd.get(0)))
+                    break;
+                body.add(cmd);
+                cmd = getCommand();
+            }
+            macros.put(name, new Object[]{params, body});
+        }else if ("include".equals(s)) { // First: check Directives
             if (2 != size)
                 throw new Exception("use: INCLUDE FILENAME");
             String fname = cmd.get(1);// todo check repeating file
@@ -285,13 +315,25 @@ public class Jens{
             if ("savesna".equals(s)) {
                 if (size < 3)
                     throw new Exception("use: savesna FILENAME.sna, STARTPOINT [STACKPLACE]");// todo STACKPLACE
-                String fname = cmd.get(1);
+                String fname =  cutQuotes(cmd.get(1));
                 int start = calculate(cmd.get(2));
                 saveSna(path + fname, start);
             }else if ("savebin".equals(s)){// todo
 
             }
-        } else {// After all directives: check Assembler command
+        }else if (macros.containsKey(s)) { //
+            Object[] macro = macros.get(s); // Vector<String> params, Vector<Vector<String>>
+            Vector<String> params = (Vector<String>)macro[0];
+            if (params.size()>size-1)
+                throw new Exception("Macros "+s+" params not completed");
+            for (int i=1; i<size; i++)
+                putVar(params.get(i-1), calculate(cmd.get(i)));
+            Vector<Vector<String>> body = (Vector<Vector<String>>)macro[1];
+            for (int i=0;i<body.size(); i++)
+                doCommand(body.get(i));
+            for (int i=0; i<params.size(); i++)
+                removeVar(params.get(i));
+        }else {// After all directives: check Assembler command
             // 1.Check params - define prefix(DD,FD), dist(IX+dist), change index to HL stuff
             String s1 = size > 1 ? cmd.get(1) : "";
             String s2 = size > 2 ? cmd.get(2) : "";
@@ -368,8 +410,7 @@ public class Jens{
             ofset+= 2==ac? 2 : 1;// add 2 or 1 byte (2 if 16 bits param)
         }
     }
-    /// Check not evaluated expressions, store errors if any
-    void remember()throws Exception{
+    void remember()throws Exception{ // Check not evaluated expressions, store errors if any
         StringBuilder errBuffer = new StringBuilder();
         for(int i=0; i<remember.size(); i++){
             Object[] rec = (Object[]) remember.get(i);
@@ -470,7 +511,7 @@ public class Jens{
                 while (i<s.length() && -1=="(+-*/\t )".indexOf(s.charAt(i)))// check before delimiters
                     i++;
                 String token = s.substring(begin, i);// Token not operator or paren: push int value.
-                int val = getNumber(token);
+                int val = "$".equals(token) ? ofset-1 : getNumber(token);
                 if (-1==val) // mean not number
                     val = getVar(token);
                 vals.push(val);
@@ -484,7 +525,13 @@ public class Jens{
         else
             varValues.put(name, value);
     }
-    int getVar(String name) throws Exception{ // todo getting Module.var
+    void removeVar(String name) {
+        if (null != currModule)
+            currModule.remove(name);
+        else
+            varValues.remove(name);
+    }
+    int getVar(String name) throws Exception{ // todo getting Module.var ???
         Integer iv = null;
         if (null!=currModule && '@'!=name.charAt(0))
             iv = currModule.get(name);
@@ -625,7 +672,7 @@ public class Jens{
         rsv.add("include");rsv.add("insert");rsv.add("device");rsv.add("page");rsv.add("org");rsv.add("module");
         rsv.add("endmodule");rsv.add("savesna");rsv.add("savebin");rsv.add("db");rsv.add("dw");rsv.add("ds");
         rsv.add("equ");rsv.add("if");rsv.add("endif");rsv.add("unphase");rsv.add("phase");rsv.add("display");
-        // rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");
+        rsv.add("macro");rsv.add("endm");//rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");rsv.add("");
     }
 ///------------------------- IN / OUT Routines ---------------
     public void saveSna(String path, int start) { // 48 while
@@ -638,22 +685,13 @@ public class Jens{
             mem[sp+1] = (byte) (start >> 8); // 0xbfff
             OutputStream os = new FileOutputStream(new File(path));
             os.write(ir>>8); // 0x3f
-            os.write(hl2&255);os.write(hl2>>8); // 10072;
-            os.write(de2&255);os.write(de2>>8);
-            os.write(bc2&255);os.write(bc2>>8);
-            os.write(af2&255);os.write(af2>>8);
-            os.write(hl&255);os.write(hl>>8);
-            os.write(de&255);os.write(de>>8);
-            os.write(bc&255);os.write(bc>>8);
-            os.write(iy&255);os.write(iy>>8); //
-            os.write(ix&255);os.write(ix>>8);
-            os.write(inter); // 0
-            os.write(ir&255);
-            os.write(af&255);os.write(af>>8);
-            os.write(sp&255);os.write(sp>>8); // 0xfffe
-            os.write(intMode); // 1
-            os.write(border);
-            os.write(mem, 0x4000, 0xc000);
+            os.write(hl2&255);os.write(hl2>>8); os.write(de2&255);os.write(de2>>8);
+            os.write(bc2&255);os.write(bc2>>8); os.write(af2&255);os.write(af2>>8);
+            os.write(hl&255); os.write(hl>>8);  os.write(de&255);os.write(de>>8);
+            os.write(bc&255); os.write(bc>>8);  os.write(iy&255);os.write(iy>>8); //
+            os.write(ix&255); os.write(ix>>8);  os.write(inter);    os.write(ir&255);
+            os.write(af&255); os.write(af>>8);  os.write(sp&255);os.write(sp>>8); // 0xfffe
+            os.write(intMode);   os.write(border);    os.write(mem, 0x4000, 0xc000);
         }catch (IOException e) {
             e.printStackTrace();
         }

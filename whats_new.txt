@@ -2,3 +2,6 @@
 	v.0.02
 	+saveSna
 	+whats_new.txt to git
+23.07.15
+	v.0.03
+	+macros with params (see macros_params.asm)
